@@ -184,13 +184,16 @@ function revealCell(c: CellType) {
 
   // 地雷を踏んだときの特別処理
   if (c.isMine) {
-    // 地雷を踏んでも状態を戻さず、単に選び直しを促す
-    // Undo回数を消費して残りを減らす
     if (undoUsedAfterLose.value < maxUndoAfterLose) {
+      // まだ救済回数が残っている →カウンター増やして警告
       undoUsedAfterLose.value++;
+      const remaining = maxUndoAfterLose - undoUsedAfterLose.value;
+      alert(`💥 BOOM! 地雷です。\n残りUndo: ${remaining}`);
+    } else {
+      // 救済回数を使い切った →ゲームオーバー
+      alert('💥 BOOM! Game Over');
+      revealAll();
     }
-    const remaining = maxUndoAfterLose - undoUsedAfterLose.value;
-    alert(`💥 BOOM! 地雷です。\n残りUndo: ${remaining}`);
     return;
   }
 
