@@ -93,12 +93,12 @@ function saveHistory() {
 }
 
 // Undo（地雷踏み時のみ使用）
-function undo() {
-  if (historyIndex.value <= 0) return;
-  historyIndex.value--;
-  const prev = historyStack.value[historyIndex.value].cells;
-  cells.splice(0, cells.length, ...prev.map(c => ({ ...c })));
-}
+// function undo() {
+//   if (historyIndex.value <= 0) return;
+//   historyIndex.value--;
+//   const prev = historyStack.value[historyIndex.value].cells;
+//   cells.splice(0, cells.length, ...prev.map(c => ({ ...c })));
+// }
 
 // 設定を反映して再初期化
 function applySettings() {
