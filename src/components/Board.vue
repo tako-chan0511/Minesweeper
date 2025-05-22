@@ -102,16 +102,13 @@ function undo() {
 
 // 設定を反映して再初期化
 function applySettings() {
-  // すでに何かマスを開いていたりフラグを立てていたら確認
   const inProgress = cells.some(c => c.revealed || c.flagged);
   if (inProgress) {
     const ok = confirm(
       'ゲーム途中ですが、現在のゲームを終了して新しい設定を適用しますか？\n' +
       '「OK」で再スタート、キャンセルで継続します。'
     );
-    if (!ok) {
-      return;
-    }
+    if (!ok) return;
   }
   width.value = pendingWidth.value;
   height.value = pendingHeight.value;
@@ -169,42 +166,35 @@ function neighbors(c: CellType): CellType[] {
   );
 }
 
-// セルを開く
+// --- 新：再帰的に履歴を取らずに開示する本体関数 ---
+function doReveal(c: CellType) {
+  if (c.revealed || c.flagged) return;
+  c.revealed = true;
+  if (c.adjacent === 0) {
+    neighbors(c).forEach(n => {
+      doReveal(n);
+    });
+  }
+  checkWin();
+}
+
+// セルを開く（１クリック＝１履歴保存）
 function revealCell(c: CellType) {
   if (c.revealed || c.flagged) return;
 
   // 地雷を踏んだときの特別処理
   if (c.isMine) {
-    // Undo 機能が残っていれば戻すか確認
-    if (
-      undoUsedAfterLose.value < maxUndoAfterLose &&
-      confirm(`💥 BOOM! 地雷を踏みました。\n残りUndo：${maxUndoAfterLose - undoUsedAfterLose.value}\n戻しますか？`)
-    ) {
-      // １つ前だけに戻す
-      undoUsedAfterLose.value++;
-      undo();
-    } else {
-      alert('💥 BOOM! Game Over');
-      revealAll();
-    }
+    // 地雷を踏んでも状態を戻さず、単に選び直しを促す
+    alert('💥 BOOM! 地雷です。別のセルを開いてください。');
     return;
   }
 
-  // 通常の開示処理
+  // 通常の開示処理：ここだけ履歴を保存
   saveHistory();
-  c.revealed = true;
-
-  // 隣接0なら連鎖開示
-  if (c.adjacent === 0) {
-    neighbors(c).forEach(n => {
-      if (!n.revealed) revealCell(n);
-    });
-  }
-
-  // 勝利判定
-  checkWin();
+  doReveal(c);
 }
-// フラグトグル
+
+// フラグトグル（クリックごとに履歴）
 function toggleFlag(c: CellType) {
   if (!c.revealed) {
     saveHistory();
