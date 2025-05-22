@@ -185,7 +185,12 @@ function revealCell(c: CellType) {
   // 地雷を踏んだときの特別処理
   if (c.isMine) {
     // 地雷を踏んでも状態を戻さず、単に選び直しを促す
-    alert('💥 BOOM! 地雷です。別のセルを開いてください。');
+    // Undo回数を消費して残りを減らす
+    if (undoUsedAfterLose.value < maxUndoAfterLose) {
+      undoUsedAfterLose.value++;
+    }
+    const remaining = maxUndoAfterLose - undoUsedAfterLose.value;
+    alert(`💥 BOOM! 地雷です。\n残りUndo: ${remaining}`);
     return;
   }
 
