@@ -6,10 +6,14 @@
       mine: cell.revealed && cell.isMine,
       flagged: cell.flagged
     }"
-    @click="reveal()"
-    @contextmenu.prevent="toggleFlag()"
+    @mousedown.prevent="onMouseDown"
+    @mouseup="onMouseUp"
+    @mouseleave="onMouseUp"
+    @touchstart="onTouchStart"
+    @touchend="onTouchEnd"
+    @contextmenu.prevent="toggleFlag"
   >
-    <span v-if="cell.revealed && !cell.isMine && cell.adjacent>0">
+    <span v-if="cell.revealed && !cell.isMine && cell.adjacent > 0">
       {{ cell.adjacent }}
     </span>
     <span v-if="cell.flagged">🚩</span>
@@ -18,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps } from 'vue';
+import { ref } from 'vue';
 import type { CellType } from './Board.vue';
 
 const props = defineProps<{
@@ -27,9 +31,58 @@ const props = defineProps<{
   onToggleFlag: () => void;
 }>();
 
+// 長押し検出用タイマー
+const pressTimer = ref<number|undefined>(undefined);
+const PRESS_THRESHOLD = 500; // ms
+
+function clearPress() {
+  if (pressTimer.value !== undefined) {
+    clearTimeout(pressTimer.value);
+    pressTimer.value = undefined;
+  }
+}
+
+function startPress() {
+  clearPress();
+  pressTimer.value = window.setTimeout(() => {
+    props.onToggleFlag();
+    clearPress();
+  }, PRESS_THRESHOLD);
+}
+
+function onMouseDown(e: MouseEvent) {
+  if (e.button === 2) {
+    // 右クリックは即フラグ
+    props.onToggleFlag();
+  } else {
+    startPress();
+  }
+}
+
+function onMouseUp() {
+  if (pressTimer.value !== undefined) {
+    // 長押ししきる前に離した → 開く
+    clearPress();
+    reveal();
+  }
+}
+
+function onTouchStart() {
+  startPress();
+}
+
+function onTouchEnd() {
+  if (pressTimer.value !== undefined) {
+    // 長押ししきる前に離した → 開く
+    clearPress();
+    reveal();
+  }
+}
+
 function reveal() {
   if (!props.cell.flagged) props.onReveal();
 }
+
 function toggleFlag() {
   if (!props.cell.revealed) props.onToggleFlag();
 }

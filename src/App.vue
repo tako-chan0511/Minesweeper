@@ -1,6 +1,6 @@
 <template>
   <div class="controls">
-     Vue3 マインドスイパー
+     Vue3 マインスイパー
   </div>
 
   <!-- ↓ 既存の <Board> に props で渡す -->
