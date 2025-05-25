@@ -6,11 +6,11 @@
       mine: cell.revealed && cell.isMine,
       flagged: cell.flagged
     }"
-    @mousedown.prevent="onMouseDown"
+    @mousedown="onMouseDown"
     @mouseup="onMouseUp"
-    @mouseleave="onMouseUp"
-    @touchstart="onTouchStart"
-    @touchend="onTouchEnd"
+    @mouseleave="onMouseLeave"
+    @touchstart.prevent="onTouchStart"
+    @touchend.prevent="onTouchEnd"
     @contextmenu.prevent="toggleFlag"
   >
     <span v-if="cell.revealed && !cell.isMine && cell.adjacent > 0">
@@ -22,81 +22,98 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import type { CellType } from './Board.vue';
+import { ref } from 'vue'
+import type { CellType } from './Board.vue'
 
 const props = defineProps<{
-  cell: CellType;
-  onReveal: () => void;
-  onToggleFlag: () => void;
-}>();
+  cell: CellType
+  onReveal: () => void
+  onToggleFlag: () => void
+}>()
 
-// 長押し検出用タイマー
-const pressTimer = ref<number|undefined>(undefined);
-const PRESS_THRESHOLD = 500; // ms
+// 長押し検出用
+const pressTimer = ref<number | null>(null)
+const PRESS_THRESHOLD = 500  // ms
 
 function clearPress() {
-  if (pressTimer.value !== undefined) {
-    clearTimeout(pressTimer.value);
-    pressTimer.value = undefined;
+  if (pressTimer.value !== null) {
+    clearTimeout(pressTimer.value)
+    pressTimer.value = null
   }
 }
 
+// モバイル／PC長押し開始
 function startPress() {
-  clearPress();
+  clearPress()
   pressTimer.value = window.setTimeout(() => {
-    props.onToggleFlag();
-    clearPress();
-  }, PRESS_THRESHOLD);
+    props.onToggleFlag()
+    clearPress()
+  }, PRESS_THRESHOLD)
 }
 
+// PC 左ボタン押下
 function onMouseDown(e: MouseEvent) {
-  if (e.button === 2) {
-    // 右クリックは即フラグ
-    props.onToggleFlag();
-  } else {
-    startPress();
+  if (e.button !== 0) return
+  startPress()
+}
+
+// PC 左ボタン離す
+function onMouseUp(e: MouseEvent) {
+  if (e.button !== 0) return
+  if (pressTimer.value !== null) {
+    // 長押し閾値に達していなければ「開く」
+    clearPress()
+    props.onReveal()
   }
 }
 
-function onMouseUp() {
-  if (pressTimer.value !== undefined) {
-    // 長押ししきる前に離した → 開く
-    clearPress();
-    reveal();
-  }
+// マウスがセル外に出たらキャンセル
+function onMouseLeave() {
+  clearPress()
 }
 
+// モバイル タッチ開始
 function onTouchStart() {
-  startPress();
+  startPress()
 }
 
+// モバイル タッチ終了
 function onTouchEnd() {
-  if (pressTimer.value !== undefined) {
-    // 長押ししきる前に離した → 開く
-    clearPress();
-    reveal();
+  if (pressTimer.value !== null) {
+    clearPress()
+    props.onReveal()
   }
 }
 
-function reveal() {
-  if (!props.cell.flagged) props.onReveal();
-}
-
+// PC 右クリック／コンテキストメニュー
 function toggleFlag() {
-  if (!props.cell.revealed) props.onToggleFlag();
+  if (!props.cell.revealed) {
+    props.onToggleFlag()
+  }
 }
 </script>
 
 <style scoped>
 .cell {
-  width: 30px; height: 30px;
+  width: 30px;
+  height: 30px;
   border: 1px solid #444;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   user-select: none;
 }
-.cell.hidden { background: #ccc; cursor: pointer; }
-.cell.revealed { background: #eee; }
-.cell.flagged { background: #ffc; }
-.cell.mine { background: #f88; }
+.cell.hidden {
+  background: #ccc;
+  cursor: pointer;
+}
+.cell.revealed {
+  background: #eee;
+}
+.cell.flagged {
+  background: #ffc;
+}
+.cell.mine {
+  background: #f88;
+}
 </style>
