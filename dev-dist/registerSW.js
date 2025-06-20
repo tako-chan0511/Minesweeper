@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/Minesweeper/dev-sw.js?dev-sw', { scope: '/Minesweeper/', type: 'classic' })
