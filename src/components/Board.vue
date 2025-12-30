@@ -1,8 +1,6 @@
 <template>
   <div class="board-container">
-    <!-- 操作コントロール -->
     <div class="controls">
-      <!-- サイズ・地雷数の設定 -->
       <label>
         幅:
         <input type="number" v-model.number="pendingWidth" min="5" max="30" />
@@ -20,17 +18,18 @@
           :max="pendingWidth * pendingHeight - 1"
         />
       </label>
-      <!-- 設定完了 -->
       <button @click="applySettings">設定完了</button>
-      <!-- 再スタート（現在の設定でリセット） -->
       <button @click="initBoard">再スタート</button>
-      <!-- 残りUndo回数 -->
+    </div>
+
+    <div class="status-bar">
+      <span>💣 残り地雷: <strong>{{ remainingMinesCount }}</strong></span>
+      <span>⬜ 残り安全マス: <strong>{{ remainingSafeCells }}</strong></span>
       <span class="undo-info">
-        (残りUndo: {{ maxUndoAfterLose - undoUsedAfterLose }})
+        (Undo残り: {{ maxUndoAfterLose - undoUsedAfterLose }})
       </span>
     </div>
 
-    <!-- 盤面表示 -->
     <div
       class="board"
       :style="{
@@ -50,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue';
+import { reactive, ref, onMounted, computed } from 'vue'; // ★ computed を追加
 import Cell from './Cell.vue';
 
 export interface CellType {
@@ -75,30 +74,35 @@ const minesCount = ref(15);
 
 // — 盤面セルと履歴管理 —
 const cells = reactive<CellType[]>([]);
-const maxUndoAfterLose    = 7;
+const maxUndoAfterLose    = 10;
 const undoUsedAfterLose   = ref(0);
 
 interface Snapshot { cells: CellType[] }
 const historyStack = ref<Snapshot[]>([]);
 const historyIndex = ref(-1);
 
+// ★追加：残り地雷数（設定地雷数 - 旗の数）
+const remainingMinesCount = computed(() => {
+  const flags = cells.filter(c => c.flagged).length;
+  return minesCount.value - flags;
+});
+
+// ★追加：残り安全マス数（ (全マス - 地雷) - (開けた安全マス) ）
+// これが 0 になると勝利です
+const remainingSafeCells = computed(() => {
+  const totalSafe = (width.value * height.value) - minesCount.value;
+  const revealedSafe = cells.filter(c => c.revealed && !c.isMine).length;
+  return totalSafe - revealedSafe;
+});
+
 // 操作前に履歴を保存
 function saveHistory() {
-  // 「取り消し」操作後の履歴は切り捨て
   historyStack.value.splice(historyIndex.value + 1);
   historyStack.value.push({
     cells: cells.map(c => ({ ...c }))
   });
   historyIndex.value = historyStack.value.length - 1;
 }
-
-// Undo（地雷踏み時のみ使用）
-// function undo() {
-//   if (historyIndex.value <= 0) return;
-//   historyIndex.value--;
-//   const prev = historyStack.value[historyIndex.value].cells;
-//   cells.splice(0, cells.length, ...prev.map(c => ({ ...c })));
-// }
 
 // 設定を反映して再初期化
 function applySettings() {
@@ -166,7 +170,7 @@ function neighbors(c: CellType): CellType[] {
   );
 }
 
-// --- 新：再帰的に履歴を取らずに開示する本体関数 ---
+// 再帰的に開く処理
 function doReveal(c: CellType) {
   if (c.revealed || c.flagged) return;
   c.revealed = true;
@@ -178,31 +182,28 @@ function doReveal(c: CellType) {
   checkWin();
 }
 
-// セルを開く（１クリック＝１履歴保存）
+// セルを開く
 function revealCell(c: CellType) {
   if (c.revealed || c.flagged) return;
 
-  // 地雷を踏んだときの特別処理
+  // 地雷を踏んだ場合
   if (c.isMine) {
     if (undoUsedAfterLose.value < maxUndoAfterLose) {
-      // まだ救済回数が残っている →カウンター増やして警告
       undoUsedAfterLose.value++;
       const remaining = maxUndoAfterLose - undoUsedAfterLose.value;
       alert(`💥 BOOM! 地雷です。\n残りUndo: ${remaining}`);
     } else {
-      // 救済回数を使い切った →ゲームオーバー
       alert('💥 BOOM! Game Over');
       revealAll();
     }
     return;
   }
 
-  // 通常の開示処理：ここだけ履歴を保存
   saveHistory();
   doReveal(c);
 }
 
-// フラグトグル（クリックごとに履歴）
+// フラグトグル
 function toggleFlag(c: CellType) {
   if (!c.revealed) {
     saveHistory();
@@ -210,19 +211,22 @@ function toggleFlag(c: CellType) {
   }
 }
 
-// 全セルを開示
+// 全開示
 function revealAll() {
   cells.forEach(c => c.revealed = true);
 }
 
-// 勝利判定＋メッセージ
+// 勝利判定
 function checkWin() {
   const won = cells
     .filter(c => !c.isMine)
     .every(c => c.revealed);
   if (won) {
-    alert('🎉 You Win! 🎉');
-    revealAll();
+    // 描画更新を待ってからアラートを出すためにsetTimeoutを使用
+    setTimeout(() => {
+      alert('🎉 You Win! 🎉');
+      revealAll();
+    }, 10);
   }
 }
 </script>
@@ -235,25 +239,42 @@ function checkWin() {
 }
 .controls {
   margin-bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
 }
 .controls label {
-  margin-right: 8px;
   font-size: 0.9em;
 }
 .controls input {
   width: 4ch;
   margin-left: 4px;
 }
-.controls button {
-  margin-left: 8px;
+
+/* ★追加：ステータスバーのスタイル */
+.status-bar {
+  margin-bottom: 12px;
+  padding: 8px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  display: flex;
+  gap: 15px;
+  font-family: monospace;
+  font-size: 1.1em;
 }
+
 .undo-info {
-  margin-left: 12px;
-  font-size: 0.9em;
   color: #666;
+  font-size: 0.9em;
+  align-self: center;
 }
+
 .board {
   display: grid;
   gap: 2px;
+  background: #aaa; /* グリッドの隙間をグレーにして区切りを見やすく */
+  padding: 2px;
+  border-radius: 4px;
 }
 </style>
