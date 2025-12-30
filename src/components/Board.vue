@@ -75,7 +75,7 @@ const minesCount = ref(15);
 
 // — 盤面セルと履歴管理 —
 const cells = reactive<CellType[]>([]);
-const maxUndoAfterLose    = 3;
+const maxUndoAfterLose    = 7;
 const undoUsedAfterLose   = ref(0);
 
 interface Snapshot { cells: CellType[] }
