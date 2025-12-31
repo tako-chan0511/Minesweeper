@@ -24,9 +24,16 @@
 
     <div class="status-bar">
       <span>💣 残り地雷: <strong>{{ remainingMinesCount }}</strong></span>
-      <span>⬜ 残り安全マス: <strong>{{ remainingSafeCells }}</strong></span>
+      <span>⬜ 残り安全: <strong>{{ remainingSafeCells }}</strong></span>
       <span class="undo-info">
-        (Undo残り: {{ maxUndoAfterLose - undoUsedAfterLose }})
+        (Undo: {{ maxUndoAfterLose - undoUsedAfterLose }})
+      </span>
+    </div>
+
+    <div class="probability-bar">
+      地雷確率: 
+      <span :style="{ color: probabilityColor, fontWeight: 'bold' }">
+        {{ hoveredProbability }}
       </span>
     </div>
 
@@ -43,6 +50,8 @@
         :cell="cell"
         :onReveal="() => revealCell(cell)"
         :onToggleFlag="() => toggleFlag(cell)"
+        @mouseover="onMouseOverCell(cell)"
+        @mouseleave="onMouseLeaveCell"
       />
     </div>
   </div>
@@ -81,7 +90,11 @@ interface Snapshot { cells: CellType[] }
 const historyStack = ref<Snapshot[]>([]);
 const historyIndex = ref(-1);
 
-// 残り地雷数（設定地雷数 - 旗の数）
+// ホバー中の確率表示用
+const hoveredProbability = ref('---');
+const probabilityColor = ref('black');
+
+// 残り地雷数
 const remainingMinesCount = computed(() => {
   const flags = cells.filter(c => c.flagged).length;
   return minesCount.value - flags;
@@ -94,7 +107,130 @@ const remainingSafeCells = computed(() => {
   return totalSafe - revealedSafe;
 });
 
-// 操作前に履歴を保存
+// ————————————————
+// ★確率計算ロジック（厳密版）
+// ————————————————
+function onMouseOverCell(target: CellType) {
+  // 既に開いている or 旗は計算不要
+  if (target.revealed) {
+    hoveredProbability.value = '0%';
+    probabilityColor.value = '#ccc';
+    return;
+  }
+  if (target.flagged) {
+    hoveredProbability.value = '100% (Flag)';
+    probabilityColor.value = 'red';
+    return;
+  }
+
+  // 1. 周囲のヒント（数字マス）を収集
+  // targetに隣接する数字マスたち
+  const adjacentClues = neighbors(target).filter(n => n.revealed && !n.isMine);
+
+  let maxProb = -1.0;
+  let minProb = 2.0; // 0%確定を見つけるために使用
+
+  // ヒントが一つもない場合
+  if (adjacentClues.length === 0) {
+    const totalUnknown = cells.filter(x => !x.revealed && !x.flagged).length;
+    const totalMinesLeft = remainingMinesCount.value;
+    if (totalUnknown > 0) {
+      let p = totalMinesLeft / totalUnknown;
+      p = Math.max(0, Math.min(1, p));
+      hoveredProbability.value = `${(p * 100).toFixed(1)}% (全体)`;
+      probabilityColor.value = '#666';
+    } else {
+      hoveredProbability.value = '0%';
+      probabilityColor.value = '#666';
+    }
+    return;
+  }
+
+  // ヒントがある場合：各ヒントについて確率を計算し、最も厳しい条件を採用する
+  for (const clueA of adjacentClues) {
+    // Aの未開封近傍セル（Set A）
+    const hiddenNeighborsA = neighbors(clueA).filter(n => !n.revealed && !n.flagged);
+    // Aの残り必要爆弾数
+    const minesNeededA = clueA.adjacent - neighbors(clueA).filter(n => n.flagged).length;
+
+    // --- ① 基本確率 (Local Probability) ---
+    if (hiddenNeighborsA.length > 0) {
+      const p = minesNeededA / hiddenNeighborsA.length;
+      if (p > maxProb) maxProb = p;
+      if (p < minProb) minProb = p;
+    }
+
+    // --- ② 集合差分確率 (Subset / Strict Probability) ---
+    // Clue A の近傍にある、別の Clue B を探す
+    const nearbyClues = neighbors(clueA).filter(n => n.revealed && !n.isMine && n.id !== clueA.id);
+
+    for (const clueB of nearbyClues) {
+      // Bの未開封近傍セル（Set B）
+      const hiddenNeighborsB = neighbors(clueB).filter(n => !n.revealed && !n.flagged);
+      const minesNeededB = clueB.adjacent - neighbors(clueB).filter(n => n.flagged).length;
+
+      // 【判定】Set B が Set A の「部分集合」か？
+      // (Bの未開封セルがすべて、Aの未開封セルに含まれているか)
+      const isSubset = hiddenNeighborsB.every(b => hiddenNeighborsA.some(a => a.id === b.id));
+
+      if (isSubset) {
+        // 部分集合の場合、「差分エリア（A - B）」の確率を確定できる
+        const diffCount = hiddenNeighborsA.length - hiddenNeighborsB.length;
+        const diffMines = minesNeededA - minesNeededB;
+
+        if (diffCount > 0) {
+          // target が「B側（内側）」にいるのか、「差分側（外側）」にいるのか確認
+          const targetInB = hiddenNeighborsB.some(b => b.id === target.id);
+          
+          if (!targetInB) {
+            // target は「差分エリア」にいる → (差分爆弾 / 差分マス数)
+            let pStrict = diffMines / diffCount;
+            // 補正
+            pStrict = Math.max(0, Math.min(1, pStrict));
+
+            // より厳しい条件（高い確率 or 0%）があれば更新
+            if (pStrict > maxProb) maxProb = pStrict;
+            // 0% (安全) が判明した場合も重要
+            if (pStrict < minProb) minProb = pStrict;
+          }
+        }
+      }
+    }
+  }
+
+  // 結果の整形
+  // もし計算の結果、確率が0以下（安全確定）なら0%を表示
+  if (minProb <= 0.000001) {
+    maxProb = 0;
+  } else if (maxProb < 0) {
+    maxProb = 0;
+  } else if (maxProb > 1) {
+    maxProb = 1;
+  }
+
+  hoveredProbability.value = `${(maxProb * 100).toFixed(1)}%`;
+
+  // 色分け：100%は赤、0%は青、それ以外は危険度に応じて
+  if (maxProb >= 0.99) {
+    probabilityColor.value = 'red';
+  } else if (maxProb <= 0.01) {
+    probabilityColor.value = 'blue'; // 安全確定
+  } else if (maxProb >= 0.5) {
+    probabilityColor.value = 'orange';
+  } else {
+    probabilityColor.value = 'black';
+  }
+}
+
+function onMouseLeaveCell() {
+  hoveredProbability.value = '---';
+  probabilityColor.value = 'black';
+}
+
+// ————————————————
+// 既存ロジック（変更なし）
+// ————————————————
+
 function saveHistory() {
   historyStack.value.splice(historyIndex.value + 1);
   historyStack.value.push({
@@ -103,7 +239,6 @@ function saveHistory() {
   historyIndex.value = historyStack.value.length - 1;
 }
 
-// 設定を反映して再初期化
 function applySettings() {
   const inProgress = cells.some(c => c.revealed || c.flagged);
   if (inProgress) {
@@ -119,11 +254,9 @@ function applySettings() {
   initBoard();
 }
 
-// 盤面初期化
 function initBoard() {
   cells.length = 0;
   let id = 0;
-  // 1. 空セルを生成
   for (let y = 0; y < height.value; y++) {
     for (let x = 0; x < width.value; x++) {
       cells.push({
@@ -136,7 +269,6 @@ function initBoard() {
       id++;
     }
   }
-  // 2. 地雷をランダム配置
   let placed = 0;
   while (placed < minesCount.value) {
     const idx = Math.floor(Math.random() * cells.length);
@@ -145,22 +277,20 @@ function initBoard() {
       placed++;
     }
   }
-  // 3. 周囲地雷数を計算
   for (const c of cells) {
     if (!c.isMine) {
       c.adjacent = neighbors(c).filter(n => n.isMine).length;
     }
   }
-  // 履歴リセット
   historyStack.value = [];
   historyIndex.value = -1;
   undoUsedAfterLose.value = 0;
   saveHistory();
+  onMouseLeaveCell();
 }
 
 onMounted(initBoard);
 
-// 隣接セル取得
 function neighbors(c: CellType): CellType[] {
   return cells.filter(n =>
     Math.abs(n.x - c.x) <= 1 &&
@@ -169,7 +299,6 @@ function neighbors(c: CellType): CellType[] {
   );
 }
 
-// 再帰的に開く処理
 function doReveal(c: CellType) {
   if (c.revealed || c.flagged) return;
   c.revealed = true;
@@ -181,11 +310,8 @@ function doReveal(c: CellType) {
   checkWin();
 }
 
-// セルを開く
 function revealCell(c: CellType) {
   if (c.revealed || c.flagged) return;
-
-  // 地雷を踏んだ場合
   if (c.isMine) {
     if (undoUsedAfterLose.value < maxUndoAfterLose) {
       undoUsedAfterLose.value++;
@@ -197,50 +323,38 @@ function revealCell(c: CellType) {
     }
     return;
   }
-
   saveHistory();
   doReveal(c);
+  onMouseOverCell(c);
 }
 
-// ★修正：旗を立てるロジック（数字以上の入力を禁止）
 function toggleFlag(c: CellType) {
   if (c.revealed) return;
-
-  // 1. 旗を「外す」場合 → 無条件でOK
   if (c.flagged) {
     saveHistory();
     c.flagged = false;
+    onMouseOverCell(c);
     return;
   }
-
-  // 2. 旗を「立てる」場合 → 周囲の数字チェック
   const surr = neighbors(c);
   for (const n of surr) {
-    // 隣接セルが開いていて、かつ数字（0以上の地雷数）を持っている場合
     if (n.revealed && !n.isMine) {
-      // その数字マスの周りにある「現在の旗の数」を数える
       const ns = neighbors(n);
       const currentFlagCount = ns.filter(x => x.flagged).length;
-
-      // 「現在の旗」が「数字」以上であれば、これ以上旗を置かせない
       if (currentFlagCount >= n.adjacent) {
-        // ※必要であればここに alert('これ以上置けません') などを入れる
         return; 
       }
     }
   }
-
-  // チェックを通過したら旗を立てる
   saveHistory();
   c.flagged = true;
+  onMouseOverCell(c);
 }
 
-// 全開示
 function revealAll() {
   cells.forEach(c => c.revealed = true);
 }
 
-// 勝利判定
 function checkWin() {
   const won = cells
     .filter(c => !c.isMine)
@@ -274,9 +388,8 @@ function checkWin() {
   width: 4ch;
   margin-left: 4px;
 }
-
 .status-bar {
-  margin-bottom: 12px;
+  margin-bottom: 5px;
   padding: 8px;
   background-color: #f9f9f9;
   border-radius: 4px;
@@ -285,13 +398,17 @@ function checkWin() {
   font-family: monospace;
   font-size: 1.1em;
 }
-
+.probability-bar {
+  margin-bottom: 10px;
+  font-family: monospace;
+  font-size: 1.2em;
+  height: 1.5em;
+}
 .undo-info {
   color: #666;
   font-size: 0.9em;
   align-self: center;
 }
-
 .board {
   display: grid;
   gap: 2px;
