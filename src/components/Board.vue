@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed } from 'vue'; // ★ computed を追加
+import { reactive, ref, onMounted, computed } from 'vue';
 import Cell from './Cell.vue';
 
 export interface CellType {
@@ -74,21 +74,20 @@ const minesCount = ref(15);
 
 // — 盤面セルと履歴管理 —
 const cells = reactive<CellType[]>([]);
-const maxUndoAfterLose    = 10;
+const maxUndoAfterLose    = 7;
 const undoUsedAfterLose   = ref(0);
 
 interface Snapshot { cells: CellType[] }
 const historyStack = ref<Snapshot[]>([]);
 const historyIndex = ref(-1);
 
-// ★追加：残り地雷数（設定地雷数 - 旗の数）
+// 残り地雷数（設定地雷数 - 旗の数）
 const remainingMinesCount = computed(() => {
   const flags = cells.filter(c => c.flagged).length;
   return minesCount.value - flags;
 });
 
-// ★追加：残り安全マス数（ (全マス - 地雷) - (開けた安全マス) ）
-// これが 0 になると勝利です
+// 残り安全マス数
 const remainingSafeCells = computed(() => {
   const totalSafe = (width.value * height.value) - minesCount.value;
   const revealedSafe = cells.filter(c => c.revealed && !c.isMine).length;
@@ -203,12 +202,37 @@ function revealCell(c: CellType) {
   doReveal(c);
 }
 
-// フラグトグル
+// ★修正：旗を立てるロジック（数字以上の入力を禁止）
 function toggleFlag(c: CellType) {
-  if (!c.revealed) {
+  if (c.revealed) return;
+
+  // 1. 旗を「外す」場合 → 無条件でOK
+  if (c.flagged) {
     saveHistory();
-    c.flagged = !c.flagged;
+    c.flagged = false;
+    return;
   }
+
+  // 2. 旗を「立てる」場合 → 周囲の数字チェック
+  const surr = neighbors(c);
+  for (const n of surr) {
+    // 隣接セルが開いていて、かつ数字（0以上の地雷数）を持っている場合
+    if (n.revealed && !n.isMine) {
+      // その数字マスの周りにある「現在の旗の数」を数える
+      const ns = neighbors(n);
+      const currentFlagCount = ns.filter(x => x.flagged).length;
+
+      // 「現在の旗」が「数字」以上であれば、これ以上旗を置かせない
+      if (currentFlagCount >= n.adjacent) {
+        // ※必要であればここに alert('これ以上置けません') などを入れる
+        return; 
+      }
+    }
+  }
+
+  // チェックを通過したら旗を立てる
+  saveHistory();
+  c.flagged = true;
 }
 
 // 全開示
@@ -222,7 +246,6 @@ function checkWin() {
     .filter(c => !c.isMine)
     .every(c => c.revealed);
   if (won) {
-    // 描画更新を待ってからアラートを出すためにsetTimeoutを使用
     setTimeout(() => {
       alert('🎉 You Win! 🎉');
       revealAll();
@@ -252,7 +275,6 @@ function checkWin() {
   margin-left: 4px;
 }
 
-/* ★追加：ステータスバーのスタイル */
 .status-bar {
   margin-bottom: 12px;
   padding: 8px;
@@ -273,7 +295,7 @@ function checkWin() {
 .board {
   display: grid;
   gap: 2px;
-  background: #aaa; /* グリッドの隙間をグレーにして区切りを見やすく */
+  background: #aaa;
   padding: 2px;
   border-radius: 4px;
 }
