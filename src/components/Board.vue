@@ -295,6 +295,7 @@ function solveExact(compIndices: number[]) {
 
   // 簡易枝刈り関数
   function checkPartial(k: number) {
+    void k;
     // 現在決定したセル(k)が関与するヒントだけチェック
     // ※今回は実装簡略化のため、全探索でも十分速いのでスキップ
     // （本格的なソルバーならここで矛盾を弾く）
