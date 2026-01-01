@@ -129,13 +129,6 @@ function getNeighborIndices(idx: number): number[] {
   return res;
 }
 
-function clamp01(v: number) {
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
-}
-
-
 function calculateProbabilities() {
   // 1. 初期化
   cells.forEach(c => {
@@ -245,59 +238,127 @@ function calculateProbabilities() {
    * ※あくまでヒューリスティックです（厳密ソルバではない）。
    */
   function recalcLocalAroundNumber(center: CellType) {
-  // クリックした数字セルの「周辺8マス」だけ、確率の総和が (残り地雷数) に一致するように補正する。
-  // ※局所補正なので、全体最適の保証はしません（ただし「見た目の破綻」を素早く直す目的には有効）。
+    if (!center.revealed) return;
+    if (center.mine) return;
+    if (center.adjacent <= 0) return;
 
-  if (!center.revealed || center.isMine || center.adjacent <= 0) return;
+    const nIdx = getNeighborIndices(center.x, center.y);
 
-  const nIdxs = getNeighborIndices(center.id);
-  const flagged = nIdxs.reduce((s, i) => s + (cells[i].flagged ? 1 : 0), 0);
-  const unknownIdxs = nIdxs.filter((i) => !cells[i].revealed && !cells[i].flagged);
-
-  if (unknownIdxs.length === 0) return;
-
-  // 数字が示す「この周辺にある地雷数」
-  let remaining = center.adjacent - flagged;
-  if (remaining < 0) remaining = 0;
-  if (remaining > unknownIdxs.length) remaining = unknownIdxs.length;
-
-  // ★局所の合計が remaining になるように均等配分
-  const p = clamp01(remaining / unknownIdxs.length);
-  for (const i of unknownIdxs) cells[i].probability = p;
-
-  // 5%未満→0 / 95%以上→1 について：
-  // これは「ヒント表示」としては有効ですが、一般には誤判定になり得ます。
-  // ただし remaining が 0 / 全部 のときは論理的に確定なので、その場合だけ確定させます。
-  if (remaining === 0) {
-    for (const i of unknownIdxs) cells[i].probability = 0;
-  } else if (remaining === unknownIdxs.length) {
-    for (const i of unknownIdxs) cells[i].probability = 1;
-  }
-
-  // ★全体の確率合計が「残り地雷数」になるよう、局所以外を軽く正規化（破綻防止）
-  const totalRemaining = Math.max(0, remainingMinesCount.value);
-  const localSum = unknownIdxs.reduce((s, i) => s + cells[i].probability, 0);
-
-  const otherIdxs: number[] = [];
-  for (let i = 0; i < cells.length; i++) {
-    const c = cells[i];
-    if (c.revealed || c.flagged) continue;
-    if (unknownIdxs.includes(i)) continue;
-    otherIdxs.push(i);
-  }
-
-  const targetOtherSum = Math.max(0, totalRemaining - localSum);
-  if (otherIdxs.length > 0) {
-    const otherSum = otherIdxs.reduce((s, i) => s + cells[i].probability, 0);
-    if (otherSum <= 0) {
-      const q = clamp01(targetOtherSum / otherIdxs.length);
-      for (const i of otherIdxs) cells[i].probability = q;
-    } else {
-      const ratio = targetOtherSum / otherSum;
-      for (const i of otherIdxs) cells[i].probability = clamp01(cells[i].probability * ratio);
+    const unknown: CellType[] = [];
+    let flagged = 0;
+    for (const idx of nIdx) {
+      const c = cells[idx];
+      if (c.flagged) {
+        flagged += 1;
+        continue;
+      }
+      if (!c.revealed) unknown.push(c);
     }
+
+    if (unknown.length === 0) return;
+
+    // その数字セルの周囲で「まだ地雷であるべき数」
+    const targetRaw = center.adjacent - flagged;
+    const target = Math.max(0, Math.min(targetRaw, unknown.length));
+
+    // 現在の周囲確率合計
+    const clamp01 = (p: number) => Math.max(0, Math.min(1, p));
+    const eps = 1e-9;
+
+    const probs = unknown.map((c) => clamp01(c.probability));
+    let fixedOnes = 0;
+
+    // まずは単純スケールで目標合計に近づける（ゼロ割回避あり）
+    const sum0 = probs.reduce((a, b) => a + b, 0);
+    if (sum0 < eps) {
+      const p = target / unknown.length;
+      for (let i = 0; i < probs.length; i++) probs[i] = clamp01(p);
+    } else {
+      const scale = target / sum0;
+      for (let i = 0; i < probs.length; i++) probs[i] = clamp01(probs[i] * scale);
+    }
+
+    // [0,1] 制約付きで合計を target に合わせる（最大10回）
+    const normalizeToSum = (arr: number[], tgt: number) => {
+      for (let iter = 0; iter < 10; iter++) {
+        const s = arr.reduce((a, b) => a + b, 0);
+        const delta = tgt - s;
+        if (Math.abs(delta) < 1e-6) break;
+
+        const adjustable: number[] = [];
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i] > 0 && arr[i] < 1) adjustable.push(i);
+        }
+        if (adjustable.length === 0) break;
+
+        if (delta > 0) {
+          let cap = 0;
+          for (const i of adjustable) cap += 1 - arr[i];
+          if (cap < eps) break;
+          for (const i of adjustable) arr[i] = clamp01(arr[i] + (delta * (1 - arr[i])) / cap);
+        } else {
+          let cap = 0;
+          for (const i of adjustable) cap += arr[i];
+          if (cap < eps) break;
+          for (const i of adjustable) arr[i] = clamp01(arr[i] + (delta * arr[i]) / cap);
+        }
+      }
+    };
+
+    normalizeToSum(probs, target);
+
+    // しきい値（5%未満→0、95%以上→1）を「局所の整合性を壊さない範囲」で反映
+    const LOW = 0.05;
+    const HIGH = 0.95;
+
+    // 低確率は 0 に確定（安全寄りのヒューリスティック）
+    let remainingTarget = target;
+    const adjustableIdx: number[] = [];
+    for (let i = 0; i < probs.length; i++) {
+      if (probs[i] <= LOW) {
+        probs[i] = 0;
+      } else {
+        adjustableIdx.push(i);
+      }
+    }
+
+    // 高確率は「確定しても残りの合計が作れる」範囲だけ 1 に確定
+    adjustableIdx.sort((a, b) => probs[b] - probs[a]); // 高い順
+    const stillAdjustable: number[] = [];
+    for (let pos = 0; pos < adjustableIdx.length; pos++) {
+      const i = adjustableIdx[pos];
+      // i を 1 にすると仮定したときの実現可能性
+      // fixedOnes+1 <= target かつ (fixedOnes+1) + (残り可変数) >= target
+      const restCount = adjustableIdx.length - pos - 1;
+      if (probs[i] >= HIGH && fixedOnes + 1 <= target && fixedOnes + 1 + restCount >= target) {
+        probs[i] = 1;
+        fixedOnes += 1;
+      } else {
+        stillAdjustable.push(i);
+      }
+    }
+
+    remainingTarget = target - fixedOnes;
+
+    // まだ調整が必要なら、残りの可変セルで合計を合わせる
+    if (stillAdjustable.length > 0) {
+      // 可変セルだけ取り出して正規化して戻す
+      const sub = stillAdjustable.map((i) => probs[i]);
+      normalizeToSum(sub, remainingTarget);
+
+      for (let j = 0; j < stillAdjustable.length; j++) {
+        probs[stillAdjustable[j]] = clamp01(sub[j]);
+      }
+    }
+
+    // 反映
+    for (let i = 0; i < unknown.length; i++) {
+      unknown[i].probability = probs[i];
+    }
+
+    // 表示系（周辺確率合計など）を即更新したいので hover 情報更新
+    onMouseOverCell(center);
   }
-}
 
 
 // ————————————————
@@ -565,8 +626,6 @@ function revealCell(c: CellType) {
   // 既に開いている数字セルをクリックしたら「周辺だけ再計算」する
   if (c.revealed) {
     recalcLocalAroundNumber(c);
-    // 表示（周辺確率合計など）も更新
-    onMouseOverCell(c);
     return;
   }
   if (c.flagged) return;
