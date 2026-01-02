@@ -625,6 +625,22 @@ function checkWin() {
     }, 10);
   }
 }
+
+// ★テスト用に変数を公開する設定（これを追加！）
+defineExpose({
+  pendingWidth,
+  pendingHeight,
+  pendingMines,
+  cells,
+  undoUsedAfterLose,
+  applySettings,
+  initBoard,
+  toggleFlag,
+  calculateProbabilities,
+  revealCell,
+  recalcLocalAroundNumber
+});
+
 </script>
 
 <style scoped>
