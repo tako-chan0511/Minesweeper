@@ -1,5 +1,7 @@
+/// <reference types="vitest" />
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+// ★修正箇所： 'vite' ではなく 'vitest/config' から読み込むとエラーが消えます
+import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
@@ -40,6 +42,10 @@ export default defineConfig({
       }
     })
   ],
+  test: {
+    environment: 'jsdom',
+    globals: true, // これを入れておくと window や document が安定します
+  },
   // ビルド時に'@'を'src'として解決するための設定
   resolve: {
     alias: {
