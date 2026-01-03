@@ -75,14 +75,12 @@ export interface CellType {
 // — 設定 —
 const pendingWidth  = ref(10);
 const pendingHeight = ref(10);
-// ★修正: 初期値を 30 に変更
-const pendingMines  = ref(30);
+const pendingMines  = ref(15);
 
 // — 状態 —
 const width      = ref(10);
 const height     = ref(10);
-// ★修正: 初期値を 30 に変更
-const minesCount = ref(30);
+const minesCount = ref(15);
 
 const cells = reactive<CellType[]>([]);
 const maxUndoAfterLose    = 10;
@@ -242,7 +240,7 @@ function calculateProbabilities() {
    * 「その数字が要求する地雷数」に一致するように局所的に再調整します。
    *
    * 例) 数字=2、周囲未確定マスが3つで合計確率が1.97などズレた場合、
-   * 周囲3マスの確率だけを合計2.0に揃えます（0〜1に収める）。
+   *     周囲3マスの確率だけを合計2.0に揃えます（0〜1に収める）。
    *
    * ※あくまでヒューリスティックです（厳密ソルバではない）。
    */
@@ -642,6 +640,7 @@ defineExpose({
   revealCell,
   recalcLocalAroundNumber
 });
+
 </script>
 
 <style scoped>
